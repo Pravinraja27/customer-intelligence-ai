@@ -1,140 +1,367 @@
 """
 visualizations.py
-Plotly chart builders for the dashboard.
+Modern Plotly chart builders for the Customer Intelligence AI dashboard.
 """
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-# ── consistent colour palette ──────────────────────────────────
-PALETTE = px.colors.qualitative.Bold
-CLUSTER_COLORS = px.colors.qualitative.Vivid
-BG = "rgba(0,0,0,0)"
-FONT_COLOR = "#1e293b"
-GRID_COLOR = "rgba(100,116,139,0.15)"
 
-LAYOUT_BASE = dict(
-    paper_bgcolor=BG,
-    plot_bgcolor=BG,
-    font=dict(family="Inter, system-ui, sans-serif", color=FONT_COLOR, size=12),
-    margin=dict(l=20, r=20, t=55, b=20),
-    legend=dict(bgcolor="rgba(255,255,255,0.7)", bordercolor="rgba(0,0,0,0.1)", borderwidth=1),
-)
+# ============================================================
+# LIGHT THEME / DESIGN TOKENS
+# ============================================================
 
+PALETTE = [
+    "#4F46E5", "#0EA5E9", "#10B981", "#F59E0B",
+    "#EC4899", "#8B5CF6", "#F97316", "#14B8A6",
+]
+CLUSTER_COLORS = [
+    "#4F46E5", "#06B6D4", "#10B981", "#F59E0B",
+    "#EC4899", "#8B5CF6", "#F97316", "#64748B",
+]
+
+BG = "#FFFFFF"
+PLOT_BG = "#FFFFFF"
+FONT_COLOR = "#1E293B"
+MUTED_COLOR = "#64748B"
+GRID_COLOR = "#E9EEF5"
+BORDER_COLOR = "#E2E8F0"
+
+LAYOUT_BASE = {
+    "template": "plotly_white",
+    "paper_bgcolor": BG,
+    "plot_bgcolor": PLOT_BG,
+    "font": {"family": "Inter, Arial, sans-serif", "color": FONT_COLOR, "size": 12},
+    "margin": {"l": 24, "r": 24, "t": 65, "b": 30},
+    "hoverlabel": {
+        "bgcolor": "#FFFFFF",
+        "bordercolor": BORDER_COLOR,
+        "font": {"family": "Inter, Arial, sans-serif", "size": 12, "color": FONT_COLOR},
+        "align": "left",
+    },
+    "legend": {
+        "bgcolor": "rgba(255,255,255,0.85)",
+        "bordercolor": BORDER_COLOR,
+        "borderwidth": 0,
+        "font": {"size": 11, "color": FONT_COLOR},
+    },
+    "title": {
+        "font": {"size": 16, "color": FONT_COLOR},
+        "x": 0.02,
+        "xanchor": "left",
+        "y": 0.97,
+        "yanchor": "top",
+    },
+    "hovermode": "closest",
+    "autosize": True,
+}
+
+
+# ============================================================
+# SHARED HELPERS
+# ============================================================
 
 def _apply_base(fig: go.Figure, title: str = "") -> go.Figure:
-    fig.update_layout(**LAYOUT_BASE, title=dict(text=title, font=dict(size=14, color="#1e40af"), x=0.01, xanchor="left"))
-    fig.update_xaxes(gridcolor=GRID_COLOR, zeroline=False)
-    fig.update_yaxes(gridcolor=GRID_COLOR, zeroline=False)
+    """Apply the shared theme without passing duplicate layout arguments."""
+    layout = LAYOUT_BASE.copy()
+    layout["title"] = {
+        "text": title,
+        "font": {"size": 16, "color": FONT_COLOR},
+        "x": 0.02,
+        "xanchor": "left",
+        "y": 0.97,
+        "yanchor": "top",
+    }
+    fig.update_layout(**layout)
+    fig.update_xaxes(
+        gridcolor=GRID_COLOR,
+        zeroline=False,
+        showline=False,
+        ticks="outside",
+        ticklen=4,
+        tickcolor=BORDER_COLOR,
+        automargin=True,
+    )
+    fig.update_yaxes(
+        gridcolor=GRID_COLOR,
+        zeroline=False,
+        showline=False,
+        ticks="outside",
+        ticklen=4,
+        tickcolor=BORDER_COLOR,
+        automargin=True,
+    )
     return fig
 
 
-def gender_pie(df: pd.DataFrame) -> go.Figure | None:
-    if "Gender" not in df.columns:
-        return None
-    vc = df["Gender"].value_counts().reset_index()
-    vc.columns = ["Gender", "Count"]
-    fig = px.pie(
-        vc, names="Gender", values="Count",
-        color_discrete_sequence=PALETTE,
-        hole=0.45,
+def _has_columns(df: pd.DataFrame, columns: list[str]) -> bool:
+    """Check that a DataFrame contains all required columns."""
+    return isinstance(df, pd.DataFrame) and all(c in df.columns for c in columns)
+
+
+def _numeric_series(df: pd.DataFrame, column: str) -> pd.Series:
+    """Convert a column to numeric values, coercing invalid values to NaN."""
+    return pd.to_numeric(df[column], errors="coerce")
+
+
+def _empty_figure(message: str, title: str = "") -> go.Figure:
+    """Build a themed placeholder when the data cannot produce a chart."""
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        x=0.5,
+        y=0.5,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font={"size": 13, "color": MUTED_COLOR},
+        align="center",
     )
-    fig.update_traces(textposition="outside", textinfo="percent+label")
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
+    return _apply_base(fig, title)
+
+
+# ============================================================
+# CUSTOMER DEMOGRAPHICS
+# ============================================================
+
+def gender_pie(df: pd.DataFrame) -> go.Figure | None:
+    """Display customer distribution by gender."""
+    if not _has_columns(df, ["Gender"]):
+        return None
+
+    genders = df["Gender"].dropna().astype(str)
+    genders = genders[genders.str.strip() != ""]
+    if genders.empty:
+        return _empty_figure("No gender data available.", "Customer Gender Distribution")
+
+    counts = genders.value_counts().rename_axis("Gender").reset_index(name="Count")
+    fig = px.pie(
+        counts,
+        names="Gender",
+        values="Count",
+        hole=0.62,
+        color_discrete_sequence=PALETTE,
+    )
+    fig.update_traces(
+        textposition="inside",
+        textinfo="percent",
+        textfont={"size": 12, "color": "#FFFFFF"},
+        marker={"line": {"color": "#FFFFFF", "width": 3}},
+        hovertemplate="<b>%{label}</b><br>Customers: %{value:,}<br>Share: %{percent}<extra></extra>",
+        sort=False,
+    )
     return _apply_base(fig, "Customer Gender Distribution")
 
 
+# ============================================================
+# INCOME AND SPENDING
+# ============================================================
+
 def income_vs_spending_scatter(df: pd.DataFrame) -> go.Figure | None:
+    """Plot annual income against spending score."""
     needed = ["AnnualIncome", "SpendingScore"]
-    if not all(c in df.columns for c in needed):
+    if not _has_columns(df, needed):
         return None
 
-    color_col = "CustomerSegment" if "CustomerSegment" in df.columns else (
-        "Gender" if "Gender" in df.columns else None
+    plot_df = df.copy()
+    for column in needed:
+        plot_df[column] = _numeric_series(plot_df, column)
+    plot_df = plot_df.dropna(subset=needed)
+
+    if plot_df.empty:
+        return _empty_figure(
+            "No valid income and spending data available.",
+            "Annual Income vs Spending Score",
+        )
+
+    color_col = (
+        "CustomerSegment" if "CustomerSegment" in plot_df.columns
+        else "Gender" if "Gender" in plot_df.columns
+        else None
     )
-    hover_data = [c for c in ["CustomerID", "Age", "PurchaseFrequency"] if c in df.columns]
+    hover_data = [
+        c for c in ["CustomerID", "Age", "PurchaseFrequency"]
+        if c in plot_df.columns
+    ]
 
     fig = px.scatter(
-        df.dropna(subset=needed),
+        plot_df,
         x="AnnualIncome",
         y="SpendingScore",
         color=color_col,
         hover_data=hover_data,
         color_discrete_sequence=CLUSTER_COLORS,
-        opacity=0.75,
-        size_max=10,
+        opacity=0.82,
     )
-    fig.update_traces(marker=dict(size=7))
+    fig.update_traces(
+        marker={"size": 9, "line": {"width": 1, "color": "rgba(255,255,255,0.9)"}}
+    )
+    fig.update_layout(
+        xaxis_title="Annual Income",
+        yaxis_title="Spending Score",
+        legend_title_text="Customer Group",
+    )
     return _apply_base(fig, "Annual Income vs Spending Score")
 
 
+# ============================================================
+# AGE DISTRIBUTION
+# ============================================================
+
 def age_histogram(df: pd.DataFrame) -> go.Figure | None:
-    if "Age" not in df.columns:
+    """Display the age distribution of customers."""
+    if not _has_columns(df, ["Age"]):
         return None
+
+    plot_df = pd.DataFrame({"Age": _numeric_series(df, "Age")}).dropna()
+    if plot_df.empty:
+        return _empty_figure("No valid age data available.", "Customer Age Distribution")
+
     fig = px.histogram(
-        df.dropna(subset=["Age"]),
+        plot_df,
         x="Age",
         nbins=20,
-        color_discrete_sequence=["#3b82f6"],
+        color_discrete_sequence=["#4F46E5"],
+        opacity=0.95,
     )
-    fig.update_traces(marker_line_width=0.5, marker_line_color="white")
+    fig.update_traces(
+        marker={"line": {"color": "#FFFFFF", "width": 1.5}},
+        hovertemplate="Age: %{x}<br>Customers: %{y:,}<extra></extra>",
+    )
+    fig.update_layout(
+        xaxis_title="Age",
+        yaxis_title="Number of Customers",
+        bargap=0.12,
+    )
     return _apply_base(fig, "Customer Age Distribution")
 
 
+# ============================================================
+# PURCHASE FREQUENCY
+# ============================================================
+
 def purchase_freq_histogram(df: pd.DataFrame) -> go.Figure | None:
-    col = "PurchaseFrequency"
-    if col not in df.columns:
+    """Display the distribution of purchase frequency."""
+    column = "PurchaseFrequency"
+    if not _has_columns(df, [column]):
         return None
+
+    plot_df = pd.DataFrame({column: _numeric_series(df, column)}).dropna()
+    if plot_df.empty:
+        return _empty_figure(
+            "No valid purchase frequency data available.",
+            "Purchase Frequency Distribution",
+        )
+
     fig = px.histogram(
-        df.dropna(subset=[col]),
-        x=col,
+        plot_df,
+        x=column,
         nbins=15,
-        color_discrete_sequence=["#8b5cf6"],
+        color_discrete_sequence=["#8B5CF6"],
+        opacity=0.95,
     )
-    fig.update_traces(marker_line_width=0.5, marker_line_color="white")
+    fig.update_traces(
+        marker={"line": {"color": "#FFFFFF", "width": 1.5}},
+        hovertemplate="Purchase Frequency: %{x}<br>Customers: %{y:,}<extra></extra>",
+    )
+    fig.update_layout(
+        xaxis_title="Purchase Frequency",
+        yaxis_title="Number of Customers",
+        bargap=0.12,
+    )
     return _apply_base(fig, "Purchase Frequency Distribution")
 
 
+# ============================================================
+# CORRELATION MATRIX
+# ============================================================
+
 def correlation_heatmap(df: pd.DataFrame) -> go.Figure | None:
-    num = df.select_dtypes(include=[np.number]).columns.tolist()
-    exclude = {"ClusterID"}
-    num = [c for c in num if c not in exclude]
-    if len(num) < 2:
+    """Display correlations between numeric features."""
+    if not isinstance(df, pd.DataFrame):
         return None
-    corr = df[num].corr()
+
+    numeric_df = df.select_dtypes(include=[np.number]).copy()
+    numeric_df = numeric_df.drop(columns=["ClusterID"], errors="ignore")
+    numeric_df = numeric_df.loc[:, numeric_df.nunique(dropna=True) > 1]
+
+    if numeric_df.shape[1] < 2:
+        return _empty_figure(
+            "At least two varying numeric features are required.",
+            "Feature Correlation Heatmap",
+        )
+
+    corr = numeric_df.corr().replace([np.inf, -np.inf], np.nan)
     fig = go.Figure(
-        go.Heatmap(
+        data=go.Heatmap(
             z=corr.values,
             x=corr.columns.tolist(),
             y=corr.index.tolist(),
-            colorscale="RdBu",
+            colorscale=[
+                [0.0, "#DC2626"],
+                [0.25, "#FCA5A5"],
+                [0.5, "#F8FAFC"],
+                [0.75, "#93C5FD"],
+                [1.0, "#1D4ED8"],
+            ],
+            zmin=-1,
+            zmax=1,
             zmid=0,
-            text=corr.round(2).values,
+            text=np.round(corr.values, 2),
             texttemplate="%{text}",
-            showscale=True,
+            textfont={"size": 11, "color": FONT_COLOR},
+            colorbar={"title": {"text": "Correlation"}, "thickness": 12, "outlinewidth": 0},
+            hovertemplate="<b>%{y}</b> vs <b>%{x}</b><br>Correlation: %{z:.3f}<extra></extra>",
+            xgap=3,
+            ygap=3,
         )
+    )
+    fig.update_layout(
+        xaxis={"tickangle": -35, "side": "bottom"},
+        yaxis={"autorange": "reversed"},
     )
     return _apply_base(fig, "Feature Correlation Heatmap")
 
 
-def cluster_scatter(df: pd.DataFrame, x_col: str, y_col: str) -> go.Figure | None:
-    if x_col not in df.columns or y_col not in df.columns:
-        return None
-    if "ClusterID" not in df.columns:
+# ============================================================
+# CUSTOMER CLUSTERS
+# ============================================================
+
+def cluster_scatter(
+    df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+) -> go.Figure | None:
+    """Visualize customer clusters using two selected numeric features."""
+    if not _has_columns(df, [x_col, y_col, "ClusterID"]):
         return None
 
-    plot_df = df[[x_col, y_col, "ClusterID"]].dropna().copy()
-    if "CustomerSegment" in df.columns:
-        plot_df["CustomerSegment"] = df.loc[plot_df.index, "CustomerSegment"]
+    plot_df = df.copy()
+    plot_df[x_col] = _numeric_series(plot_df, x_col)
+    plot_df[y_col] = _numeric_series(plot_df, y_col)
+    plot_df = plot_df.dropna(subset=[x_col, y_col, "ClusterID"])
+
+    chart_title = f"Customer Clusters: {x_col} vs {y_col}"
+    if plot_df.empty:
+        return _empty_figure("No valid clustered customer records are available.", chart_title)
+
+    if "CustomerSegment" in plot_df.columns:
         color_col = "CustomerSegment"
     else:
         plot_df["ClusterID"] = plot_df["ClusterID"].astype(str)
         color_col = "ClusterID"
 
-    hover_cols = [c for c in ["CustomerID", "Age", "AnnualIncome"] if c in df.columns]
-    for c in hover_cols:
-        plot_df[c] = df.loc[plot_df.index, c]
+    hover_cols = [
+        c for c in [
+            "CustomerID", "Age", "AnnualIncome",
+            "SpendingScore", "PurchaseFrequency",
+        ]
+        if c in plot_df.columns and c not in [x_col, y_col]
+    ]
 
     fig = px.scatter(
         plot_df,
@@ -143,59 +370,172 @@ def cluster_scatter(df: pd.DataFrame, x_col: str, y_col: str) -> go.Figure | Non
         color=color_col,
         hover_data=hover_cols,
         color_discrete_sequence=CLUSTER_COLORS,
-        opacity=0.8,
+        opacity=0.88,
     )
-    fig.update_traces(marker=dict(size=8))
-    return _apply_base(fig, f"Customer Clusters: {x_col} vs {y_col}")
+    fig.update_traces(
+        marker={"size": 10, "line": {"width": 1, "color": "#FFFFFF"}}
+    )
+    fig.update_layout(
+        xaxis_title=x_col,
+        yaxis_title=y_col,
+        legend_title_text="Customer Segment",
+    )
+    return _apply_base(fig, chart_title)
 
 
-def actual_vs_predicted(y_test: np.ndarray, y_pred: np.ndarray, target_col: str) -> go.Figure:
+# ============================================================
+# PREDICTIVE ANALYTICS
+# ============================================================
+
+def actual_vs_predicted(
+    y_test: np.ndarray,
+    y_pred: np.ndarray,
+    target_col: str,
+) -> go.Figure:
+    """Compare actual target values with model predictions."""
+    actual = np.asarray(y_test, dtype=float).reshape(-1)
+    predicted = np.asarray(y_pred, dtype=float).reshape(-1)
+
+    if len(actual) != len(predicted):
+        return _empty_figure(
+            "Actual and predicted values have different lengths.",
+            "Actual vs Predicted Values",
+        )
+
+    valid = np.isfinite(actual) & np.isfinite(predicted)
+    actual, predicted = actual[valid], predicted[valid]
+
+    if len(actual) == 0:
+        return _empty_figure(
+            "No valid predictions are available to display.",
+            "Actual vs Predicted Values",
+        )
+
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=y_test, y=y_pred,
+            x=actual,
+            y=predicted,
             mode="markers",
-            marker=dict(color="#3b82f6", size=6, opacity=0.7),
             name="Predictions",
+            marker={
+                "color": "#4F46E5",
+                "size": 8,
+                "opacity": 0.75,
+                "line": {"color": "#FFFFFF", "width": 1},
+            },
+            hovertemplate="Actual: %{x:.3f}<br>Predicted: %{y:.3f}<extra></extra>",
         )
     )
-    mn, mx = float(min(y_test.min(), y_pred.min())), float(max(y_test.max(), y_pred.max()))
+
+    minimum = float(min(actual.min(), predicted.min()))
+    maximum = float(max(actual.max(), predicted.max()))
+    if minimum == maximum:
+        padding = abs(minimum) * 0.05 or 1.0
+        minimum -= padding
+        maximum += padding
+
     fig.add_trace(
         go.Scatter(
-            x=[mn, mx], y=[mn, mx],
+            x=[minimum, maximum],
+            y=[minimum, maximum],
             mode="lines",
-            line=dict(color="#ef4444", dash="dash", width=2),
-            name="Perfect Fit",
+            name="Perfect Prediction",
+            line={"color": "#EF4444", "dash": "dash", "width": 2},
+            hoverinfo="skip",
         )
     )
     fig.update_layout(
         xaxis_title=f"Actual {target_col}",
         yaxis_title=f"Predicted {target_col}",
+        legend_title_text="Model Evaluation",
     )
     return _apply_base(fig, "Actual vs Predicted Values")
 
 
 def feature_importance_bar(importance: pd.Series) -> go.Figure:
-    fig = px.bar(
-        x=importance.values,
-        y=importance.index,
-        orientation="h",
-        color=importance.values,
-        color_continuous_scale="Blues",
+    """Display model feature importance as a horizontal bar chart."""
+    if importance is None or len(importance) == 0:
+        return _empty_figure("Feature importance is not available.", "Feature Importance")
+
+    values = pd.to_numeric(importance, errors="coerce")
+    values = values.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if values.empty:
+        return _empty_figure(
+            "No valid feature importance values are available.",
+            "Feature Importance",
+        )
+
+    values = values.sort_values(ascending=True)
+    fig = go.Figure(
+        go.Bar(
+            x=values.values,
+            y=values.index.astype(str),
+            orientation="h",
+            marker={
+                "color": values.values,
+                "colorscale": [
+                    [0.0, "#C7D2FE"],
+                    [0.5, "#818CF8"],
+                    [1.0, "#4338CA"],
+                ],
+                "line": {"width": 0},
+            },
+            text=[f"{v:.3f}" for v in values.values],
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Importance: %{x:.4f}<extra></extra>",
+        )
     )
-    fig.update_layout(coloraxis_showscale=False, yaxis=dict(autorange="reversed"))
+    fig.update_layout(xaxis_title="Importance Score", yaxis_title="Feature")
     return _apply_base(fig, "Feature Importance")
 
 
+# ============================================================
+# SEGMENT SIZES
+# ============================================================
+
 def cluster_size_bar(df: pd.DataFrame) -> go.Figure | None:
-    if "CustomerSegment" not in df.columns:
+    """Compare the number of customers in each segment."""
+    column = "CustomerSegment"
+    if not _has_columns(df, [column]):
         return None
-    vc = df["CustomerSegment"].value_counts().reset_index()
-    vc.columns = ["Segment", "Count"]
+
+    segments = df[column].dropna().astype(str)
+    if segments.empty:
+        return _empty_figure(
+            "No customer segment labels are available.",
+            "Customers per Segment",
+        )
+
+    counts = (
+        segments.value_counts()
+        .rename_axis("Segment")
+        .reset_index(name="Count")
+        .sort_values("Count", ascending=True)
+    )
+
     fig = px.bar(
-        vc, x="Count", y="Segment", orientation="h",
+        counts,
+        x="Count",
+        y="Segment",
+        orientation="h",
         color="Segment",
         color_discrete_sequence=CLUSTER_COLORS,
+        text="Count",
     )
-    fig.update_layout(showlegend=False, yaxis=dict(autorange="reversed"))
+    fig.update_traces(
+        texttemplate="%{text:,}",
+        textposition="outside",
+        cliponaxis=False,
+        marker_line_width=0,
+        hovertemplate="<b>%{y}</b><br>Customers: %{x:,}<extra></extra>",
+    )
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title="Number of Customers",
+        yaxis_title="Customer Segment",
+        bargap=0.28,
+    )
     return _apply_base(fig, "Customers per Segment")
